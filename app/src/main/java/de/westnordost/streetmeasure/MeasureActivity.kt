@@ -473,6 +473,7 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         binding.arSceneViewContainer.performHapticFeedback(VIRTUAL_KEY)
         if (requestResult) binding.acceptResultContainer.isGone = false
         measureState = MeasureState.READY//MeasureState.DONE
+        cursorNode?.isEnabled = true
         updateDirectionButtonEnablement()
     }
 
