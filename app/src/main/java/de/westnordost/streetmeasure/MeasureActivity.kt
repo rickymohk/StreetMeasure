@@ -288,6 +288,7 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         setTrackingMessage(frame.camera.trackingFailureReason.messageResId)
 
         if (frame.camera.trackingState == TRACKING) {
+            updateDistanceTextViews()
             if (measureVertical) {
                 if (measureState == MeasureState.READY) {
                     hitPlaneAndUpdateCursor(frame)
@@ -331,7 +332,6 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         if (hitResult != null) {
             val anchor = hitResult.createAnchor()
             updateCursor(anchor)
-            updateDistanceTextViews()
             if (measureState == MeasureState.READY) {
                 setTrackingMessage(R.string.ar_core_tracking_hint_tap_to_measure)
             }
@@ -579,7 +579,6 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         lastSegment.secondNode?.worldPosition = pos
 
         updateDistance()
-        updateDistanceTextViews()
     }
 
     private fun updateDistance() {
