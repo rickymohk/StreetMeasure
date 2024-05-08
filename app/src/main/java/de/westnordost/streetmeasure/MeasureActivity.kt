@@ -163,6 +163,7 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
 
         binding.directionButton.setOnClickListener { toggleDirection() }
         binding.unitButton.setOnClickListener { toggleUnit() }
+        binding.clearButton.setOnClickListener { clearMeasuring() }
 
         binding.infoButton.setOnClickListener { InfoDialog(this).show() }
 
@@ -500,8 +501,11 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
                 secondNode = null
                 lineNode?.setParent(null)
                 lineNode = null
+                textNode?.setParent(null)
+                textNode = null
             }
         }
+        segments.clear()
     }
 
     private fun returnMeasuringResult() {
@@ -584,7 +588,7 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         val up = lastSegment?.firstNode?.up
         val hasMeasurement = pos1 != null && pos2 != null && up != null
 
-        binding.measurementSpeechBubble.isInvisible = !hasMeasurement
+        binding.measurementSpeechBubble.isInvisible = true//!hasMeasurement
         if (!hasMeasurement) return
 
         val difference = Vector3.subtract(pos1, pos2)
