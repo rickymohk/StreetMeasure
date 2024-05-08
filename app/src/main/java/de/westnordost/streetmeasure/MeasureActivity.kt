@@ -8,12 +8,14 @@ import android.util.Log
 import android.view.HapticFeedbackConstants.VIRTUAL_KEY
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.WindowManager
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import androidx.core.view.isGone
 import androidx.core.view.isInvisible
 import androidx.lifecycle.lifecycleScope
+import com.google.ar.core.Anchor
 import com.google.ar.core.Config
 import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
@@ -61,10 +63,42 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
     private var cursorRenderable: Renderable? = null
     private var pointRenderable: Renderable? = null
     private var lineRenderable: Renderable? = null
+    inner class Segment(
+        var firstNode:AnchorNode? = null,
+        var secondNode:Node? = null,
+        var lineNode: Node? = null,
+        var textNode: AnchorNode? = null,
+    ){
+        fun lineNode(): Node {
+            var node = lineNode
+            if (node == null) {
+                node = Node().apply {
+                    renderable = lineRenderable
+                    setParent(arSceneView!!.scene)
+                }
+                lineNode = node
+            }
+            return node
+        }
 
-    private var lineNode: Node? = null
-    private var firstNode: AnchorNode? = null
-    private var secondNode: Node? = null
+        fun textNode(): Node {
+            var node = textNode
+            if (node == null) {
+                node = AnchorNode().apply {
+                    ViewRenderable.builder().setView(this@MeasureActivity,R.layout.view_ar_text).build().thenAccept {
+                        renderable = it
+                    }
+                    setParent(arSceneView!!.scene)
+                }
+                textNode = node
+            }
+            return node
+        }
+    }
+    private var segments: MutableList<Segment> = mutableListOf()
+//    private var lineNode: Node? = null
+//    private var firstNode: AnchorNode? = null
+//    private var secondNode: Node? = null
     private var cursorNode: AnchorNode? = null
 
     private var measureVertical: Boolean = false
@@ -271,7 +305,8 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         val hitResults = frame.hitTest(centerX, centerY).filter {
             (it.trackable as? Plane)?.isPoseInPolygon(it.hitPose) == true
         }
-        val firstNode = firstNode
+        val lastSegment = segments.lastOrNull()
+        val firstNode = lastSegment?.firstNode
         val hitResult = if (firstNode == null) {
             hitResults.firstOrNull()
         } else {
@@ -293,8 +328,9 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         setTrackingMessage(if (cameraAngle > PI/2 * 55/90) R.string.ar_core_tracking_error_no_plane_hit else null)
 
         if (hitResult != null) {
-            updateCursor(hitResult)
-
+            val anchor = hitResult.createAnchor()
+            updateCursor(anchor)
+            updateDistanceTextViews()
             if (measureState == MeasureState.READY) {
                 setTrackingMessage(R.string.ar_core_tracking_hint_tap_to_measure)
             }
@@ -397,9 +433,9 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         }
         // in case they have been initialized already, (re)set renderables...
         cursorNode?.renderable = cursorRenderable
-        firstNode?.renderable = pointRenderable
-        secondNode?.renderable = pointRenderable
-        lineNode?.renderable = lineRenderable
+//        firstNode?.renderable = pointRenderable
+//        secondNode?.renderable = pointRenderable
+//        lineNode?.renderable = lineRenderable
     }
 
     private fun startMeasuring() {
@@ -407,19 +443,26 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         measureState = MeasureState.MEASURING
         updateDirectionButtonEnablement()
         binding.arSceneViewContainer.performHapticFeedback(VIRTUAL_KEY)
-        firstNode = AnchorNode().apply {
+        val segment = Segment()
+        segment.firstNode = AnchorNode().apply {
             renderable = pointRenderable
             setParent(arSceneView!!.scene)
             setAnchor(anchor)
         }
+        segments.add(segment)
 
         if (measureVertical) {
-            secondNode = Node()
+            segment.secondNode = Node().apply {
+                renderable = pointRenderable
+            }
             cursorNode?.isEnabled = false
         } else {
-            secondNode = AnchorNode().apply { setAnchor(anchor) }
+            segment.secondNode = AnchorNode().apply {
+                renderable = pointRenderable
+                setAnchor(anchor)
+            }
         }
-        secondNode?.apply {
+        segment.secondNode?.apply {
             renderable = pointRenderable
             setParent(arSceneView!!.scene)
         }
@@ -428,7 +471,7 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
     private fun measuringDone() {
         binding.arSceneViewContainer.performHapticFeedback(VIRTUAL_KEY)
         if (requestResult) binding.acceptResultContainer.isGone = false
-        measureState = MeasureState.DONE
+        measureState = MeasureState.READY//MeasureState.DONE
         updateDirectionButtonEnablement()
     }
 
@@ -447,14 +490,18 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         binding.acceptResultContainer.isGone = true
         distance = 0.0
         cursorNode?.isEnabled = true
-        firstNode?.anchor?.detach()
-        firstNode?.setParent(null)
-        firstNode = null
-        (secondNode as? AnchorNode)?.anchor?.detach()
-        secondNode?.setParent(null)
-        secondNode = null
-        lineNode?.setParent(null)
-        lineNode = null
+        segments.forEach {
+            it.apply {
+                firstNode?.anchor?.detach()
+                firstNode?.setParent(null)
+                firstNode = null
+                (secondNode as? AnchorNode)?.anchor?.detach()
+                secondNode?.setParent(null)
+                secondNode = null
+                lineNode?.setParent(null)
+                lineNode = null
+            }
+        }
     }
 
     private fun returnMeasuringResult() {
@@ -473,20 +520,28 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         finish()
     }
 
-    private fun updateCursor(hitResult: HitResult) {
+    private fun updateDistanceTextViews()
+    {
+        val cameraRotation = arSceneView!!.scene.camera.worldRotation
+        segments.forEach {
+            it.textNode?.localRotation = cameraRotation
+        }
+    }
+
+    private fun updateCursor(newAnchor:Anchor) {
         // release previous anchor only if it is not used by any other node
         val anchor = cursorNode?.anchor
-        if (anchor != null && anchor != firstNode?.anchor && anchor != (secondNode as? AnchorNode)?.anchor) {
+        val lastSegment = segments.lastOrNull()
+        if (anchor != null && anchor != lastSegment?.firstNode?.anchor && anchor != (lastSegment?.secondNode as? AnchorNode)?.anchor) {
             anchor.detach()
         }
 
         try {
-            val newAnchor = hitResult.createAnchor()
             val cursorNode = getCursorNode()
             cursorNode.anchor = newAnchor
 
             if (measureState == MeasureState.MEASURING) {
-                (secondNode as? AnchorNode)?.anchor = newAnchor
+                (lastSegment?.secondNode as? AnchorNode)?.anchor = newAnchor
                 updateDistance()
             }
         } catch (e: Exception) {
@@ -496,7 +551,8 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
 
     private fun updateVerticalMeasuring(cameraPose: Pose) {
         val cameraPos = cameraPose.position
-        val nodePos = firstNode!!.worldPosition
+        val lastSegment = segments.lastOrNull()
+        val nodePos = lastSegment?.firstNode!!.worldPosition
 
         val cameraToNodeHeightDifference = cameraPos.y - nodePos.y
         val cameraToNodeDistanceOnPlane = sqrt((cameraPos.x - nodePos.x).pow(2) + (cameraPos.z - nodePos.z).pow(2))
@@ -515,15 +571,17 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         val height = max(0f, cameraToNodeHeightDifference + cameraToNodeDistanceOnPlane * tan(cameraAngle))
 
         val pos = Vector3.add(nodePos, Vector3(0f, height, 0f))
-        secondNode?.worldPosition = pos
+        lastSegment.secondNode?.worldPosition = pos
 
         updateDistance()
+        updateDistanceTextViews()
     }
 
     private fun updateDistance() {
-        val pos1 = firstNode?.worldPosition
-        val pos2 = secondNode?.worldPosition
-        val up = firstNode?.up
+        val lastSegment = segments.lastOrNull()
+        val pos1 = lastSegment?.firstNode?.worldPosition
+        val pos2 = lastSegment?.secondNode?.worldPosition
+        val up = lastSegment?.firstNode?.up
         val hasMeasurement = pos1 != null && pos2 != null && up != null
 
         binding.measurementSpeechBubble.isInvisible = !hasMeasurement
@@ -533,10 +591,16 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         distance = difference.length().toDouble()
         updateMeasurementTextView()
 
-        val line = getLineNode()
-        line.worldPosition = Vector3.add(pos1, pos2).scaled(.5f)
-        line.worldRotation = Quaternion.lookRotation(difference, up)
-        line.localScale = Vector3(1f, 1f, distance.toFloat())
+        lastSegment?.lineNode()?.apply {
+            worldPosition = Vector3.add(pos1, pos2).scaled(.5f)
+            worldRotation = Quaternion.lookRotation(difference, up)
+            localScale = Vector3(1f, 1f, distance.toFloat())
+        }
+        lastSegment?.textNode()?.apply {
+            worldPosition = Vector3.add(pos1, pos2).scaled(.5f)
+            localScale = Vector3(0.3f,0.3f,0.3f)
+            (renderable as? ViewRenderable)?.view?.findViewById<TextView>(R.id.textView)?.text = displayUnit.format(distance)
+        }
     }
 
     private fun updateMeasurementTextView() {
@@ -555,17 +619,7 @@ class MeasureActivity : AppCompatActivity(), Scene.OnUpdateListener {
         return node
     }
 
-    private fun getLineNode(): Node {
-        var node = lineNode
-        if (node == null) {
-            node = Node().apply {
-                renderable = lineRenderable
-                setParent(arSceneView!!.scene)
-            }
-            lineNode = node
-        }
-        return node
-    }
+
 
     /* ----------------------------------------- Intent ----------------------------------------- */
 
